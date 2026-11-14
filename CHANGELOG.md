@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## Unreleased
 
+### Changed
+
+- The pkg-config link flags include the installed library directory in the runtime search path on Linux and macOS.
+
 ### Added
 
 - A versioned C ABI for triplets, sets, packs, and streaming, with C examples, shared and static libraries, pkg-config metadata, and CMake targets.

@@ -1,79 +1,127 @@
 # smpte-klv
 
-A parser and encoder for SMPTE ST 336 Key-Length-Value (KLV) data: 16-byte universal labels, BER lengths, BER-OID tags, KLV triplets, and all five group codings (Universal Sets, Global Sets, Local Sets, Variable-Length Packs and Defined-Length Packs).
+A parser and encoder for SMPTE ST 336 Key-Length-Value (KLV) data. It reads 16-byte universal labels, BER lengths, BER-OID tags, and all five set and pack codings. You can decode triplets directly from a buffer or feed bytes to a bounded stream decoder. The library provides a Rust API and a C API with a stable ABI.
 
-It implements ST 336 and nothing above it. It has no dictionary of keys and does not interpret values, so formats built on KLV, such as MISB ST 0601 or MXF, belong in crates that use this one. Decoding is zero-copy and never panics. A push-based decoder handles streams in chunks of any size, with bounded memory. The crate works without `std` or an allocator, has no required dependencies, and uses safe Rust throughout the parser and encoder.
+The library handles KLV framing. Applications such as MISB ST 0601 and MXF supply their own dictionaries and interpret the value bytes. The Rust crate has no required dependencies. The parser and slice encoder use safe Rust and can run without `std` or an allocator.
 
 ## Usage
 
-Decode a triplet and the set inside it. Byte 6 of the key says how the set is coded, and `group()` picks the matching decoder:
+Parse the first triplet in a buffer and read the items if it contains a Local Set. Byte 6 of the key selects the group decoder.
 
 ```rust
 use smpte_klv::{Group, Triplet};
 
 let triplet = Triplet::parse(&bytes)?;
 println!("{} ({} bytes)", triplet.key(), triplet.value().len());
-
-match triplet.group() {
-    Some(Group::Local(set)) => {
-        for item in &set {
-            let item = item?;
-            println!("tag {} = {:02X?}", item.tag, item.value);
-        }
+if let Some(Group::Local(set)) = triplet.group() {
+    for item in &set {
+        let item = item?;
+        println!("tag {} = {:02X?}", item.tag, item.value);
     }
-    Some(Group::Universal(set)) => { /* items are triplets */ }
-    Some(other) => println!("{:?}", other.coding()),
-    None => { /* a single item, or a key ST 336 does not define */ }
 }
 ```
 
-Iterate over a buffer of triplets, such as a `.klv` file:
+For a buffer containing several triplets, `Triplets::new(&bytes)` yields them in order and stops at the first error.
 
-```rust
-for triplet in smpte_klv::Triplets::new(&bytes) {
-    let triplet = triplet?;   // stops after the first malformed triplet
-}
-```
-
-Use a live feed, pushed in chunks of any size. The frames do not depend on how the input is split:
+For a live feed, push each chunk and drain the completed frames.
 
 ```rust
 let mut decoder = smpte_klv::Decoder::new();
-decoder.set_filter(move |h| h.key().eq_ignoring_version(&wanted));   // others are skipped unbuffered
-loop {
-    decoder.push(&socket_bytes());
+for chunk in chunks {
+    decoder.push(&chunk);
     for frame in decoder.frames() {
         handle(frame.key(), frame.value(), frame.offset());
     }
 }
+decoder.finish();
+for frame in decoder.frames() {
+    handle(frame.key(), frame.value(), frame.offset());
+}
 ```
 
-Encode. The encoders check every key, tag and length, so that what they write decodes, under the strict defaults, to exactly the items that went in:
+Use one `Decoder` per feed. To keep only frames with a particular key, call `set_filter` before the first push. The decoder checks each key before buffering its value.
+
+## Reading KLV
+
+| Call | Returns |
+|---|---|
+| `Header::parse(&bytes)` | the key and BER length, even if the value has yet to arrive |
+| `triplet.key()`, `triplet.value()` | the universal label and borrowed value bytes |
+| `triplet.as_bytes()` | the original encoding, including the length field, for forwarding unchanged |
+| `triplet.group()` | a view of a Universal Set, Global Set, Local Set, Variable-Length Pack or Defined-Length Pack, when the key declares one |
+| `key.group_coding()` | the group coding declared by byte 6, including the tag and length encodings where applicable |
+| `key.eq_ignoring_version(&other)` | whether two universal labels match apart from their version byte |
+| `error.offset()`, `error.is_incomplete()` | where decoding failed and whether more input could complete the triplet |
+
+`Group::with_coding` takes an explicit coding when the defining document supplies one. Group iteration reads one level at a time. An item that overruns its enclosing set or pack returns `ErrorKind::Overrun`.
+
+## Encoding groups
+
+Build a Local Set with the tag and length coding declared by its key.
 
 ```rust
 use smpte_klv::LocalSetEncoder;
 
-let mut set = LocalSetEncoder::new(key)?;       // key byte 6 = 0x0B: BER-OID tags, BER lengths
+let mut set = LocalSetEncoder::new(key)?;
 set.item(2, &timestamp)?.item(65, &[19])?;
-let packet: Vec<u8> = set.finish()?;
+let packet = set.finish()?;
 ```
 
-For a checksum that covers the header, write the header yourself with `encode::write_header` and append the value from `into_value()`. To encode without allocating, use the writers in `encode`, `ber`, `TagEncoding` and `LengthEncoding` with a `SliceSink` over your own buffer.
+Each of the five group encoders checks that its output will decode under the strict defaults. For a checksum that covers the header, use `encode::write_header` and append the bytes from `into_value()`. For allocation-free encoding, pass a `SliceSink` over your own buffer to the writers in `encode`, `ber`, `TagEncoding` or `LengthEncoding`.
 
-## API overview
+## Configuration
 
-| Item | Purpose |
-|---|---|
-| `UniversalLabel` | 16-byte key: category, registry and structure designators, version, item designator, `group_coding()`, `eq_ignoring_version`, `is_fill`, `is_well_formed`, OID `arcs()`, dotted and ST 2029 URN forms |
-| `ber` | `decode_length` / `encode_length` (short, long, non-minimal, `0x80`, `0xFF`), `decode_oid` / `encode_oid` |
-| `Header` | key and length only, for deciding before the value arrives |
-| `Triplet`, `Triplets` | zero-copy triplets: `key`, `value`, `as_bytes` (for forwarding unaltered), `group()` |
-| `Group` | `UniversalSet`, `GlobalSet`, `LocalSet`, `VariableLengthPack`, `DefinedLengthPack`, chosen from byte 6 or given with `Group::with_coding` |
-| `GroupCoding`, `TagEncoding`, `LengthEncoding` | the byte 6 tables of ST 336 |
-| `*Encoder` | build any group item by item |
-| `Decoder`, `Config`, `Frame`, `Stats` | push-based stream decoding |
-| `DecodeOptions` | `strict()` (default) or `lenient()`, top-level `0x80` handling, Fill item skipping |
-| `Error`, `ErrorKind` | what went wrong, at which byte; `is_incomplete()` means "feed more" (never true inside a set or pack, whose size is fixed: that is `ErrorKind::Overrun`) |
+`Config` sets the stream decoder's memory limits and validation options.
+
+```rust
+use smpte_klv::{Config, Decoder};
+
+let mut config = Config::default();
+config.max_value_len = 64 * 1024;
+config.options.skip_fill = true;
+let mut decoder = Decoder::with_config(config);
+```
+
+| Field | Default | Purpose |
+|---|---|---|
+| `max_value_len` | 16 MiB | skip larger values without buffering them |
+| `max_queue_bytes` | 64 MiB | bound queued frames and their bookkeeping. An empty queue can accept one larger frame |
+| `max_skip_len` | `u64::MAX` | resynchronise on the next key if a triplet to be skipped declares more bytes than this limit |
+| `options` | `DecodeOptions::strict()` | control key validation, BER-OID tags, Global Sets and Fill handling |
+| `resync_on_reserved_category` | `false` | treat reserved key categories as damage when scanning for the next key |
+
+With the defaults, the decoder recovers from damage by scanning for the SMPTE prefix `06 0E 2B 34`. Set both length limits near the largest triplet you expect to bound how much data a damaged length can consume. `decoder.stats()` counts frames, skipped bytes and recoveries. Each input byte is delivered, skipped or still buffered.
+
+<a id="c-abi"></a>
+
+## C API
+
+Include `<smpte_klv.h>` to parse, stream or encode KLV. The header documents status codes, pointer lifetimes, thread use and how to set `struct_size`. [Public header](include/smpte_klv.h)
+
+On Linux or macOS, build and install both libraries, the header and the pkg-config and CMake files.
+
+```bash
+make
+sudo make install      # default prefix: /usr/local
+```
+
+Compile a C application with pkg-config.
+
+```bash
+cc app.c $(pkg-config --cflags --libs smpte_klv) -o app
+```
+
+In a CMake project, link the installed target.
+
+```cmake
+find_package(smpte_klv 0.1 REQUIRED)
+target_link_libraries(app PRIVATE smpte_klv::smpte_klv)   # or smpte_klv::smpte_klv_static
+```
+
+- `smpte_klv_abi_version()` returns the ABI version to compare with `SMPTE_KLV_ABI_VERSION`. The shared library name carries the same version, for example `libsmpte_klv.so.1` on Linux.
+- The CMake static target includes Rust's system libraries. For other build systems, `pkg-config --static --libs smpte_klv` lists them.
+- Make accepts `PREFIX`, `LIBDIR`, `INCLUDEDIR` and `DESTDIR`. Use the same settings with `make uninstall`.
+- On Windows with MSVC, `cargo rustc --release --lib --features capi --crate-type cdylib,staticlib` builds `smpte_klv.dll`, its import library `smpte_klv.dll.lib` and the static library `smpte_klv.lib` in `target/release`.
 
 ## Standards compliance
 
@@ -102,13 +150,6 @@ The rules are taken from SMPTE ST 336:2017 (which the 2007 edition matches for e
 
 Every example in ST 336:2017 Annexes A to H, and the Global Set example from the 2007 edition, is decoded and re-encoded byte for byte in [tests/spec_examples.rs](tests/spec_examples.rs).
 
-## Robustness
-
-- **No panics on input.** Every decoder reports malformed or truncated data as an `Error` with a byte offset.
-- **No trust in declared lengths.** Nothing is allocated from a length read off the wire. The `Decoder` skips values above `Config::max_value_len` (16 MiB by default) without buffering them, and holds at most `Config::max_queue_bytes` of finished frames, counting each frame's bookkeeping as well as its bytes (one frame larger than the limit is still accepted into an empty queue).
-- **No recursion.** Nested groups are decoded one level at a time, at the caller's request, so deep nesting cannot exhaust the stack.
-- **Resynchronisation.** The `Decoder` skips damage by scanning for the next `06 0E 2B 34` (with `require_smpte_key`, the default). A damaged length that is still valid looks like a real one and is skipped, or buffered, by its declared size. Set `Config::max_skip_len` to bound the skip; together with `max_value_len` it caps what one damaged length can cost, so a bit error cannot discard the rest of a stream. `Stats` accounts for every byte: each pushed byte is counted once, as delivered, skipped or still buffered.
-
 ## Features
 
 | Feature | Default | Adds |
@@ -122,69 +163,50 @@ With `default-features = false` the crate is `no_std` and does no allocation.
 
 The minimum supported Rust version is 1.70. The optional `serde` dependency needs a newer compiler.
 
-## C ABI
-
-C, C++, and languages with a C FFI can parse and encode triplets, read and build all five group codings, and push chunks through a bounded stream decoder. The [public header](include/smpte_klv.h) specifies the functions, status codes, buffer lifetimes, and ABI version.
-
-On Linux and macOS, install the header, shared and static libraries, pkg-config file, and CMake package into a prefix of your choice.
-
-```sh
-prefix="$HOME/.local"
-make install PREFIX="$prefix"
-export PKG_CONFIG_PATH="$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-cc examples/c/klv_dump.c $(pkg-config --cflags --libs smpte_klv) -Wl,-rpath,"$prefix/lib" -o klv_dump
-```
-
-For a CMake project, use `find_package(smpte_klv 0.1 REQUIRED)` and link to `smpte_klv::smpte_klv` for shared linking or `smpte_klv::smpte_klv_static` for static linking. The static target includes the system libraries Rust requires. The two C examples write a Local Set to a file and read it back through the streaming API.
-
-```sh
-cmake -S examples/c -B build -DCMAKE_PREFIX_PATH="$prefix"
-cmake --build build
-./build/klv_encode sample.klv
-./build/klv_dump sample.klv
-# @0 060E2B34020B01010E01030101000000 4 bytes
-```
-
-Pass `-DSMPTE_KLV_STATIC=ON` to build the examples with the static library. For staged installs, Make accepts `DESTDIR`, `LIBDIR`, and `INCLUDEDIR`. Use the same prefix and directories with `make uninstall`.
-
-On Windows with the MSVC Rust toolchain, build both libraries with Cargo.
-
-```powershell
-cargo rustc --release --lib --features capi --crate-type cdylib --crate-type staticlib
-```
-
-Include `include/smpte_klv.h` and link against `target/release/smpte_klv.dll.lib` for the DLL, or `target/release/smpte_klv.lib` for the static library. Place `smpte_klv.dll` beside the executable when using the DLL.
-
 ## Examples
 
 ```bash
-cargo run --example klvdump -- capture.klv --values     # structure of every triplet and set
-cargo run --example encode -- annex.klv                 # one of each group, from ST 336 Annexes C-G
-cat capture.klv | cargo run --example stream -- --key 06.0E.2B.34.02.0B.01.01.0E.01.03.01.01.00.00.00
+cargo run --release --example encode -- annex.klv       # write the five ST 336 Annex C-G groups
+cargo run --release --example klvdump -- annex.klv --values
+cargo run --release --example stream < annex.klv
+```
+
+The stream example accepts `--key <universal-label>` to select a key ignoring its version byte.
+
+With the C package installed, write a Local Set to a file and read it back with the stream decoder. Pass `-DSMPTE_KLV_STATIC=ON` at configure time for static linking. [Encoder](examples/c/klv_encode.c) · [Decoder](examples/c/klv_dump.c)
+
+```bash
+cmake -S examples/c -B build
+cmake --build build
+./build/klv_encode sample.klv
+./build/klv_dump sample.klv
 ```
 
 ## Tests
 
 ```bash
 cargo test --all-features
+make check               # C package tests on Linux and macOS
 ```
 
-The suite has unit tests in each module, the ST 336 Annex examples, randomised round trips through every coding, tests that every split of a stream gives the same result, truncation and corruption at every byte, and a short fuzzing pass. Run `make check` on Linux or macOS to install into a temporary prefix, verify the ABI from C, and run both examples with shared and static linking through pkg-config and CMake.
+The Rust suite covers ST 336 Annex examples, every group coding, chunk boundaries, truncated and corrupted input, and randomised round trips. The C tests install the package into a temporary prefix, verify the exported symbols against the header, and run shared and static consumers built with pkg-config and CMake.
 
 ## Fuzzing
 
-Three harnesses in [tests/harness](tests/harness/mod.rs) accept any bytes:
+Three Rust harnesses exercise the parser, decoder and encoders. [Harness source](tests/harness/mod.rs)
 
 - `parse`: raw bytes, decoded as triplets and as the value of each of the 26 group codings. It checks error positions, that items tile their set exactly, and that every decoded group re-encodes to the same items.
 - `stream`: raw bytes through the `Decoder`, pushed whole and in random chunks. The frames and stats must match, every byte must be accounted for, and buffers must stay within their limits.
 - `roundtrip`: the bytes describe nested groups to build with the encoders, including Global Tags of every size the key allows. Each item must be refused for a reason an independent check agrees with, or decode back exactly under the strict options. The packets must stream back out unchanged, and with a damaged length between them, the decoder must lose only that header.
 
-`cargo test` runs them over a few thousand mutated inputs on the stable toolchain. For longer runs, or coverage-guided fuzzing with [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz):
+`cargo test` runs them over a few thousand mutated inputs on the stable toolchain. Use a larger iteration count for longer runs, or use [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) for coverage-guided fuzzing.
 
 ```bash
 SMPTE_KLV_FUZZ_ITERATIONS=1000000 cargo test --release --test fuzz
 cargo +nightly fuzz run parse
 ```
+
+CI also fuzzes the C ABI with libFuzzer and AddressSanitizer. [C harness](tests/c/fuzz.c)
 
 The stable runner saves a failing input under `target/fuzz-failures/`. Once it is fixed, add the input to `tests/fuzz_regressions/<target>/` so every test run replays it.
 

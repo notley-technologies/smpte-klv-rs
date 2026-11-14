@@ -42,7 +42,7 @@ for i in "${!static_flags[@]}"; do
     if [[ ${static_flags[i]} == -lsmpte_klv ]]; then static_flags[i]="$lib/libsmpte_klv.a"; fi
 done
 for linkage in shared static; do
-    if [[ $linkage == shared ]]; then flags=("${shared_flags[@]}" "-Wl,-rpath,$lib"); else flags=("${static_flags[@]}"); fi
+    if [[ $linkage == shared ]]; then flags=("${shared_flags[@]}"); else flags=("${static_flags[@]}"); fi
     for program in tests/c/abi_test examples/c/klv_encode examples/c/klv_dump; do
         cc "${cflags[@]}" "$program.c" "${flags[@]}" -o "$work/${program##*/}"
     done
