@@ -1,0 +1,25 @@
+# Semantic versioning: same major version, and while the major version is
+# 0, same minor version too.
+set(PACKAGE_VERSION "@VERSION@")
+string(REPLACE "." ";" _smpte_klv_parts "${PACKAGE_VERSION}")
+list(GET _smpte_klv_parts 0 _smpte_klv_major)
+list(GET _smpte_klv_parts 1 _smpte_klv_minor)
+
+if(NOT PACKAGE_FIND_VERSION)
+  set(PACKAGE_VERSION_COMPATIBLE TRUE)
+elseif(PACKAGE_FIND_VERSION VERSION_GREATER PACKAGE_VERSION)
+  set(PACKAGE_VERSION_COMPATIBLE FALSE)
+elseif(NOT PACKAGE_FIND_VERSION_MAJOR EQUAL _smpte_klv_major)
+  set(PACKAGE_VERSION_COMPATIBLE FALSE)
+elseif(_smpte_klv_major EQUAL 0 AND NOT PACKAGE_FIND_VERSION_MINOR EQUAL _smpte_klv_minor)
+  set(PACKAGE_VERSION_COMPATIBLE FALSE)
+else()
+  set(PACKAGE_VERSION_COMPATIBLE TRUE)
+  if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
+    set(PACKAGE_VERSION_EXACT TRUE)
+  endif()
+endif()
+
+unset(_smpte_klv_parts)
+unset(_smpte_klv_major)
+unset(_smpte_klv_minor)

@@ -1,0 +1,10 @@
+prefix=@PREFIX@
+libdir=@LIBDIR@
+includedir=@INCLUDEDIR@
+
+Name: smpte_klv
+Description: SMPTE ST 336 KLV parser and encoder
+Version: @VERSION@
+Libs: -L${libdir} -lsmpte_klv
+Libs.private: @NATIVE_LIBS@
+Cflags: -I${includedir}

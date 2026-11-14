@@ -1,0 +1,23 @@
+# CMake package for smpte_klv, installed by `make install`.
+#
+#   find_package(smpte_klv 0.1 REQUIRED)
+#   target_link_libraries(app PRIVATE smpte_klv::smpte_klv)         # shared
+#   target_link_libraries(app PRIVATE smpte_klv::smpte_klv_static)  # static
+
+if(TARGET smpte_klv::smpte_klv)
+  return()
+endif()
+
+add_library(smpte_klv::smpte_klv SHARED IMPORTED)
+set_target_properties(smpte_klv::smpte_klv PROPERTIES
+  IMPORTED_LOCATION "@LIBDIR@/@SHARED@"
+  IMPORTED_SONAME "@SONAME@"
+  INTERFACE_INCLUDE_DIRECTORIES "@INCLUDEDIR@")
+
+# The static library includes the Rust standard library, which needs these
+# system libraries.
+add_library(smpte_klv::smpte_klv_static STATIC IMPORTED)
+set_target_properties(smpte_klv::smpte_klv_static PROPERTIES
+  IMPORTED_LOCATION "@LIBDIR@/libsmpte_klv.a"
+  INTERFACE_INCLUDE_DIRECTORIES "@INCLUDEDIR@"
+  INTERFACE_LINK_LIBRARIES "@NATIVE_LIBS_CMAKE@")

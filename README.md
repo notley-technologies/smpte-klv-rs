@@ -2,7 +2,7 @@
 
 A parser and encoder for SMPTE ST 336 Key-Length-Value (KLV) data: 16-byte universal labels, BER lengths, BER-OID tags, KLV triplets, and all five group codings (Universal Sets, Global Sets, Local Sets, Variable-Length Packs and Defined-Length Packs).
 
-It implements ST 336 and nothing above it. It has no dictionary of keys and does not interpret values, so formats built on KLV, such as MISB ST 0601 or MXF, belong in crates that use this one. Decoding is zero-copy and never panics. A push-based decoder handles streams in chunks of any size, with bounded memory. The crate works without `std` or an allocator, has no required dependencies, and contains no `unsafe` code.
+It implements ST 336 and nothing above it. It has no dictionary of keys and does not interpret values, so formats built on KLV, such as MISB ST 0601 or MXF, belong in crates that use this one. Decoding is zero-copy and never panics. A push-based decoder handles streams in chunks of any size, with bounded memory. The crate works without `std` or an allocator, has no required dependencies, and uses safe Rust throughout the parser and encoder.
 
 ## Usage
 
@@ -115,11 +115,45 @@ Every example in ST 336:2017 Annexes A to H, and the Global Set example from the
 |---|---|---|
 | `std` | yes | `std::error::Error` impls; implies `alloc` |
 | `alloc` | via `std` | `Decoder` and the group encoders |
+| `capi` | no | Public C ABI for shared and static libraries, implies `std` |
 | `serde` | no | `Serialize` for labels, codings, options, errors, `Config` and `Stats` |
 
 With `default-features = false` the crate is `no_std` and does no allocation.
 
 The minimum supported Rust version is 1.70. The optional `serde` dependency needs a newer compiler.
+
+## C ABI
+
+C, C++, and languages with a C FFI can parse and encode triplets, read and build all five group codings, and push chunks through a bounded stream decoder. The [public header](include/smpte_klv.h) specifies the functions, status codes, buffer lifetimes, and ABI version.
+
+On Linux and macOS, install the header, shared and static libraries, pkg-config file, and CMake package into a prefix of your choice.
+
+```sh
+prefix="$HOME/.local"
+make install PREFIX="$prefix"
+export PKG_CONFIG_PATH="$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+cc examples/c/klv_dump.c $(pkg-config --cflags --libs smpte_klv) -Wl,-rpath,"$prefix/lib" -o klv_dump
+```
+
+For a CMake project, use `find_package(smpte_klv 0.1 REQUIRED)` and link to `smpte_klv::smpte_klv` for shared linking or `smpte_klv::smpte_klv_static` for static linking. The static target includes the system libraries Rust requires. The two C examples write a Local Set to a file and read it back through the streaming API.
+
+```sh
+cmake -S examples/c -B build -DCMAKE_PREFIX_PATH="$prefix"
+cmake --build build
+./build/klv_encode sample.klv
+./build/klv_dump sample.klv
+# @0 060E2B34020B01010E01030101000000 4 bytes
+```
+
+Pass `-DSMPTE_KLV_STATIC=ON` to build the examples with the static library. For staged installs, Make accepts `DESTDIR`, `LIBDIR`, and `INCLUDEDIR`. Use the same prefix and directories with `make uninstall`.
+
+On Windows with the MSVC Rust toolchain, build both libraries with Cargo.
+
+```powershell
+cargo rustc --release --lib --features capi --crate-type cdylib --crate-type staticlib
+```
+
+Include `include/smpte_klv.h` and link against `target/release/smpte_klv.dll.lib` for the DLL, or `target/release/smpte_klv.lib` for the static library. Place `smpte_klv.dll` beside the executable when using the DLL.
 
 ## Examples
 
@@ -135,7 +169,7 @@ cat capture.klv | cargo run --example stream -- --key 06.0E.2B.34.02.0B.01.01.0E
 cargo test --all-features
 ```
 
-The suite has unit tests in each module, the ST 336 Annex examples, randomised round trips through every coding, tests that every split of a stream gives the same result, truncation and corruption at every byte, and a short fuzzing pass.
+The suite has unit tests in each module, the ST 336 Annex examples, randomised round trips through every coding, tests that every split of a stream gives the same result, truncation and corruption at every byte, and a short fuzzing pass. Run `make check` on Linux or macOS to install into a temporary prefix, verify the ABI from C, and run both examples with shared and static linking through pkg-config and CMake.
 
 ## Fuzzing
 

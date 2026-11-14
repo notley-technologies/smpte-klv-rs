@@ -43,6 +43,57 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y gcc-multilib
       - run: cargo test --all-features --target i686-unknown-linux-gnu
 
+  c-package:
+    name: C package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: make check
+
+  c-fuzz:
+    name: Fuzz the C ABI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Build and exercise the instrumented static library
+        run: |
+          cargo rustc --locked --release --lib --features capi --crate-type staticlib -- \
+            -Cpasses=sancov-module -Cllvm-args=-sanitizer-coverage-level=3 \
+            -Cllvm-args=-sanitizer-coverage-inline-8bit-counters -Cllvm-args=-sanitizer-coverage-pc-table \
+            -Zsanitizer=address --print native-static-libs 2> build.log || { cat build.log; exit 1; }
+          libs=$(sed -n 's/^note: native-static-libs: //p' build.log)
+          clang -std=c99 -fsanitize=fuzzer,address -Iinclude tests/c/fuzz.c target/release/libsmpte_klv.a $libs -o target/c-fuzz
+          target/c-fuzz -max_total_time=120 -max_len=16384 -artifact_prefix=target/
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-c-abi
+          path: target/crash-*
+
+  c-windows:
+    name: C ABI (Windows MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the DLL and static library
+        run: cargo rustc --locked --release --lib --features capi --crate-type cdylib --crate-type staticlib
+      - name: Compile and run a C consumer
+        shell: cmd
+        run: |
+          "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath > vs-path.txt
+          set /p VSINSTALL=<vs-path.txt
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 || exit /b 1
+          cl /nologo /std:c11 /W4 /WX /Iinclude tests\c\abi_test.c target\release\smpte_klv.dll.lib /Fe:target\release\abi_test.exe || exit /b 1
+          target\release\abi_test.exe || exit /b 1
+          if not exist target\release\smpte_klv.lib exit /b 1
+
   warnings:
     runs-on: ubuntu-latest
     steps:
@@ -130,7 +181,7 @@ jobs:
   ci-result:
     name: CI result
     if: always()
-    needs: [test, test-32bit, warnings, docs-rs, no-std, msrv, fuzz]
+    needs: [test, test-32bit, c-package, c-windows, c-fuzz, warnings, docs-rs, no-std, msrv, fuzz]
     runs-on: ubuntu-latest
     steps:
       - name: all jobs passed

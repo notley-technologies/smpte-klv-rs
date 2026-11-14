@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- A versioned C ABI for triplets, sets, packs, and streaming, with C examples, shared and static libraries, pkg-config metadata, and CMake targets.
 - Universal labels: registry fields, group coding from byte 6, version-insensitive comparison, Fill item detection, a well-formedness check against ST 336:2017 Tables 2 and 3, OID arcs, dotted and SMPTE ST 2029 URN forms, and strict parsing of the usual text forms.
 - BER length coding (short, long, non-minimal, indefinite and reserved forms) and BER-OID coding.
 - Zero-copy decoding of triplets, headers and every SMPTE ST 336 group coding: Universal, Global and Local Sets, Variable-Length and Defined-Length Packs, with all 26 registry designators of ST 336:2017 Tables 3 to 6.

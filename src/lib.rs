@@ -81,6 +81,7 @@
 //! - `alloc`: the streaming [`Decoder`] and the group encoders. Without it
 //!   the crate is `no_std` and allocation-free: decoding borrows from the
 //!   input and encoding writes to a [`SliceSink`].
+//! - `capi`: the C interface declared in `include/smpte_klv.h`. Implies `std`.
 //! - `serde`: `Serialize` for labels, codings, options, errors and stats.
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -88,12 +89,15 @@
 // Without `alloc` the docs still mention the allocating types by name.
 #![cfg_attr(not(feature = "alloc"), allow(rustdoc::broken_intra_doc_links))]
 #![warn(missing_docs)]
-#![forbid(unsafe_code)]
+#![cfg_attr(not(feature = "capi"), forbid(unsafe_code))]
+#![cfg_attr(feature = "capi", deny(unsafe_code))]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
 pub mod ber;
+#[cfg(feature = "capi")]
+mod capi;
 mod coding;
 pub mod encode;
 mod error;

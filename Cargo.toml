@@ -17,6 +17,11 @@ include = [
     "/tests/harness/*.rs",
     "/tests/fuzz_regressions/**/*.bin",
     "/examples/*.rs",
+    "/examples/c/*",
+    "/include/*.h",
+    "/c/*.in",
+    "/tests/c/*",
+    "/Makefile",
     "/README.md",
     "/LICENSE",
     "/CHANGELOG.md",
@@ -28,6 +33,8 @@ default = ["std"]
 std = ["alloc"]
 ## The streaming `Decoder` and the group encoders, which allocate.
 alloc = []
+## The public C ABI in include/smpte_klv.h.
+capi = ["std"]
 ## Derive `serde::Serialize` for labels, codings, options, errors and stats.
 serde = ["dep:serde"]
 
