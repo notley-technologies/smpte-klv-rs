@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-features
+      # Without std, and with alloc only: the tests that need the encoders
+      # and the stream decoder are left out without alloc.
+      - run: cargo test --no-default-features
+      - run: cargo test --no-default-features --features alloc
+
+  # A 32-bit target, where usize is narrower than the u64 lengths KLV can
+  # declare.
+  test-32bit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+      - run: cargo test --all-features --target i686-unknown-linux-gnu
+
+  warnings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --all-targets --all-features
+        env:
+          RUSTFLAGS: -D warnings
+      - name: docs for every feature set
+        run: |
+          for features in "--all-features" "" "--no-default-features" "--no-default-features --features alloc"; do
+            cargo doc --no-deps $features
+          done
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # The docs as docs.rs builds them, with feature labels on gated items.
+  docs-rs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+
+  no-std:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabihf
+      - uses: Swatinem/rust-cache@v2
+      # A bare-metal target has no std, so this fails if anything needs it.
+      - run: cargo build --lib --no-default-features --target thumbv7em-none-eabihf
+        env:
+          RUSTFLAGS: -D warnings
+      - run: cargo build --lib --no-default-features --features alloc --target thumbv7em-none-eabihf
+        env:
+          RUSTFLAGS: -D warnings
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.70
+      # The optional serde feature's dependencies need a newer compiler.
+      - run: cargo check --lib
+      - run: cargo check --lib --no-default-features
+
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [parse, stream, roundtrip]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: fuzz for two minutes
+        run: cargo fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} -- -max_total_time=120 -max_len=16384
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: fuzz/artifacts
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/dependency-review-action@v5
+
+  # One check for branch protection to require, instead of every job.
+  ci-result:
+    name: CI result
+    if: always()
+    needs: [test, test-32bit, warnings, docs-rs, no-std, msrv, fuzz]
+    runs-on: ubuntu-latest
+    steps:
+      - name: all jobs passed
+        run: |
+          echo '${{ toJSON(needs) }}'
+          test "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = false

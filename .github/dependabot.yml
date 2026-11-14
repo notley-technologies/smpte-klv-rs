@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: cargo
+    directory: /fuzz
+    schedule:
+      interval: monthly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      # Its refs name Rust toolchains (stable, nightly, 1.70), not action
+      # versions; the MSRV job must stay on 1.70.
+      - dependency-name: dtolnay/rust-toolchain

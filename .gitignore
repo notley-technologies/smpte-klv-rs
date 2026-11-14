@@ -1,0 +1,13 @@
+/target
+
+# Captures used for local testing stay out of the repo.
+*.ts
+*.m2ts
+*.klv
+*.mxf
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

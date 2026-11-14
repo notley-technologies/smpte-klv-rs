@@ -1,0 +1,21 @@
+name: Feature request
+description: Missing SMPTE ST 336 behaviour, or an API addition.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you need
+      description: The problem you are trying to solve, and what you would like the library to do.
+    validations:
+      required: true
+  - type: textarea
+    id: standard
+    attributes:
+      label: Standard or specification
+      description: The document and section involved (for example SMPTE ST 336:2017 section 7.3). Rules that a format built on KLV defines, such as MISB ST 0601 tags, belong in that format's crate.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Anything you have tried or considered instead.

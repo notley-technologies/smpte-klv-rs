@@ -1,0 +1,58 @@
+[package]
+name = "smpte-klv"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "SMPTE ST 336 Key-Length-Value (KLV) parser and encoder: universal labels, BER lengths, sets and packs"
+repository = "https://github.com/notley-technologies/smpte-klv-rs"
+documentation = "https://docs.rs/smpte-klv"
+readme = "README.md"
+keywords = ["klv", "smpte", "st336", "metadata", "parser"]
+categories = ["parser-implementations", "encoding", "multimedia", "no-std"]
+license = "Apache-2.0"
+include = [
+    "/src/**/*.rs",
+    "/tests/*.rs",
+    "/tests/common/*.rs",
+    "/tests/harness/*.rs",
+    "/tests/fuzz_regressions/**/*.bin",
+    "/examples/*.rs",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+]
+
+[features]
+default = ["std"]
+## `std::error::Error` for the error types. Implies `alloc`.
+std = ["alloc"]
+## The streaming `Decoder` and the group encoders, which allocate.
+alloc = []
+## Derive `serde::Serialize` for labels, codings, options, errors and stats.
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+
+# docs.rs builds with `--cfg docsrs` to mark feature-gated items.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(docsrs)"] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[[example]]
+name = "klvdump"
+required-features = ["std"]
+
+[[example]]
+name = "encode"
+required-features = ["std"]
+
+[[example]]
+name = "stream"
+required-features = ["std"]
