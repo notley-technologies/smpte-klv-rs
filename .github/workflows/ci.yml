@@ -42,6 +42,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y gcc-multilib
       - run: cargo test --all-features --target i686-unknown-linux-gnu
+      - name: Run the C ABI tests with 32-bit pointers and lengths
+        run: |
+          cargo rustc --locked --lib --features capi --crate-type cdylib --target i686-unknown-linux-gnu
+          lib="$PWD/target/i686-unknown-linux-gnu/debug"
+          cc -m32 -std=c99 -Wall -Wextra -Werror -pedantic -Iinclude tests/c/abi_test.c \
+            -L"$lib" -Wl,-rpath,"$lib" -lsmpte_klv -o target/abi-test-i686
+          target/abi-test-i686
 
   c-package:
     name: C package (${{ matrix.os }})

@@ -136,12 +136,13 @@ fn huge_declared_lengths_are_not_trusted() {
     let mut buf = key.as_bytes().to_vec();
     buf.extend([0x88, 0x10, 0, 0, 0, 0, 0, 0, 0]);
     let e = Triplet::parse(&buf).unwrap_err();
-    if usize::BITS >= 64 {
-        assert_eq!(e.kind(), ErrorKind::UnexpectedEnd { needed: 25 + (1 << 60), available: 25 });
+    let total = (1u64 << 60) + 25;
+    if let Ok(needed) = usize::try_from(total) {
+        assert_eq!(e.kind(), ErrorKind::UnexpectedEnd { needed, available: 25 });
     } else {
         assert_eq!(e.kind(), ErrorKind::LengthOverflow);
     }
-    assert_eq!(Header::parse(&buf).unwrap().total_len(), Some((1 << 60) + 25));
+    assert_eq!(Header::parse(&buf).unwrap().total_len(), Some(total));
 
     // The decoder skips it without buffering, then finds the next item.
     let mut stream = buf.clone();
